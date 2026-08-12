@@ -1,5 +1,5 @@
 name: "SkoleIntra Homework Bridge"
-version: "0.1.0"
+version: "0.1.1"
 slug: "skoleintra_ha_bridge"
 description: "Syncs SkoleIntra Lektiebog homework into per-child to-do lists"
 url: "https://github.com/bymem/skoleintra-ha-bridge"

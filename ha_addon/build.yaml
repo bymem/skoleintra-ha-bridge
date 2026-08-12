@@ -1,7 +1,0 @@
-# node:22-alpine is itself multi-arch, so the same tag serves every arch here.
-# Pinned per-arch anyway because that is the shape the Supervisor expects and it
-# leaves room to diverge later.
-build_from:
-  aarch64: "node:22-alpine"
-  amd64: "node:22-alpine"
-  armv7: "node:22-alpine"

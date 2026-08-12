@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.1
+
+Fixes the build failing on install with `npm: not found`.
+
+The base image is now pinned directly in the Dockerfile and `build.yaml` is
+gone. It had two problems: the Supervisor validates `build_from` against a
+regex requiring a namespaced image path, so a bare `node:22-alpine` failed
+validation and the Supervisor silently fell back to its own base image (which
+has no Node); and `build.yaml` is deprecated in favour of the Dockerfile.
+
+The Dockerfile also no longer consumes `BUILD_FROM`. The Supervisor always
+injects it, so an `ARG BUILD_FROM` default could never take effect. Docker now
+reports that build arg as unused — that warning is expected.
+
 ## 0.1.0
 
 First packaged release. Not yet proven against a live Home Assistant instance —
