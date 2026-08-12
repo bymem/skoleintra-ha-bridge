@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.3
+
+No longer creates to-do items for homework whose date has already passed.
+
+The Lektiebog notes listing returns a period surrounding today, so it includes
+days that are already gone. Those were being synced as fresh to-do items even
+though they were past due. Homework dated today is still included, since the
+first poll of the day runs before school.
+
+"Everything fetched is in the past" is now distinguished from "the fetch
+returned nothing" — only the second is a scrape failure. Otherwise a school
+holiday would trip the EMPTY_FETCH brake on every poll.
+
+Note that items already synced are not removed when their date passes, so an
+uncompleted item stays on the list. Auto-removal is still not implemented.
+
 ## 0.1.2
 
 Fixes every item failing with "could not find it again to read its uid".

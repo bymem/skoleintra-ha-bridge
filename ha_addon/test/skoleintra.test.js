@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parse } from 'node-html-parser';
-import { itemsFromNote, parseDanishDate, decodeEntities } from '../src/skoleintra.js';
+import { itemsFromNote, parseDanishDate, decodeEntities, dropPastItems, localIsoDate } from '../src/skoleintra.js';
 
 // Shaped like the real thing: a teacher-authored CKEditor table, complete with
 // the `widht` typo that is actually in the live markup.
@@ -114,4 +114,46 @@ test('decodes the entities that actually appear in teacher content', () => {
 
 test('unknown entities are left alone rather than mangled', () => {
   assert.equal(decodeEntities('&notarealentity;'), '&notarealentity;');
+});
+
+// --- Past-dated homework -------------------------------------------------
+
+test('homework dated before today is dropped', () => {
+  const items = [
+    { date: '2026-08-10', subject: 'DANSK', homework: 'a' },
+    { date: '2026-08-11', subject: 'ENGELSK', homework: 'b' },
+    { date: '2026-08-12', subject: 'MATEMATIK', homework: 'c' },
+    { date: '2026-08-17', subject: 'HISTORIE', homework: 'd' },
+  ];
+
+  const kept = dropPastItems(items, '2026-08-12');
+
+  assert.deepEqual(kept.map((i) => i.date), ['2026-08-12', '2026-08-17']);
+});
+
+test("today's homework is kept — the morning poll runs before school", () => {
+  const items = [{ date: '2026-08-12', subject: 'MATEMATIK', homework: 'c' }];
+  assert.equal(dropPastItems(items, '2026-08-12').length, 1);
+});
+
+test('dropping past items across a month and year boundary', () => {
+  const items = [
+    { date: '2026-08-31', subject: 'A', homework: 'x' },
+    { date: '2026-09-01', subject: 'B', homework: 'x' },
+    { date: '2026-12-31', subject: 'C', homework: 'x' },
+    { date: '2027-01-04', subject: 'D', homework: 'x' },
+  ];
+  assert.deepEqual(dropPastItems(items, '2026-09-01').map((i) => i.subject), ['B', 'C', 'D']);
+  assert.deepEqual(dropPastItems(items, '2027-01-01').map((i) => i.subject), ['D']);
+});
+
+test('localIsoDate uses local time, not UTC', () => {
+  // Late evening local time is already the next day in UTC. Using toISOString()
+  // here would skip a whole day of homework for anyone east of Greenwich.
+  const lateEvening = new Date(2026, 7, 12, 23, 30, 0);
+  assert.equal(localIsoDate(lateEvening), '2026-08-12');
+});
+
+test('localIsoDate zero-pads single-digit months and days', () => {
+  assert.equal(localIsoDate(new Date(2026, 0, 5)), '2026-01-05');
 });

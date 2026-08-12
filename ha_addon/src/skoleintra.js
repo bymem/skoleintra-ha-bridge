@@ -107,6 +107,25 @@ export function itemsFromNote(noteEl, date) {
   return remaining ? [{ date, subject: 'Lektier', homework: remaining }] : [];
 }
 
+// Today in the container's local timezone, as yyyy-mm-dd.
+// Deliberately not toISOString(), which is UTC and would roll the date over at
+// the wrong moment for a Danish school day.
+export function localIsoDate(now = new Date()) {
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+// The Lektiebog notes listing returns a period surrounding today, so it
+// includes days that have already passed. Homework for a past date is already
+// due and shouldn't become a fresh to-do item. Today itself is kept — the first
+// poll of the day is before school.
+//
+// Dates are yyyy-mm-dd, so a plain string compare is a correct date compare.
+export function dropPastItems(items, today = localIsoDate()) {
+  return items.filter((item) => item.date >= today);
+}
+
 export class SkoleIntraClient {
   constructor({ baseUrl, username, password, cookieFile }) {
     this.baseUrl = baseUrl.replace(/\/$/, '');

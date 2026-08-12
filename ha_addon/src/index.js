@@ -8,7 +8,7 @@
 import cron from 'node-cron';
 import { loadConfig } from './config.js';
 import { Store } from './store.js';
-import { SkoleIntraClient } from './skoleintra.js';
+import { SkoleIntraClient, dropPastItems } from './skoleintra.js';
 import { HomeAssistantClient } from './ha.js';
 import { reconcile, nextMap } from './reconcile.js';
 import { verifyAll } from './verify-ha.js';
@@ -27,8 +27,23 @@ async function pollChild({ child, skoleintra, ha, store }) {
     throw new Error(`No Lektiebog diary found for ${child.name}`);
   }
 
-  const { items, datesSeen } = await skoleintra.fetchHomework(child.child_path_segment, diaryId);
-  console.log(`  diary ${diaryId}: ${items.length} item(s) across ${datesSeen.length} day(s)`);
+  const { items: fetched, datesSeen } = await skoleintra.fetchHomework(child.child_path_segment, diaryId);
+
+  // The notes listing covers a period around today, past days included.
+  const items = dropPastItems(fetched);
+  const skipped = fetched.length - items.length;
+  console.log(
+    `  diary ${diaryId}: ${items.length} current item(s) across ${datesSeen.length} day(s)` +
+    (skipped ? `, ${skipped} past-dated item(s) skipped` : ''),
+  );
+
+  // Distinguish "everything fetched is in the past" from "the fetch returned
+  // nothing". Only the latter is a scrape failure; letting the first case reach
+  // the reconciler would trip the EMPTY_FETCH brake every poll over a holiday.
+  if (items.length === 0 && fetched.length > 0) {
+    console.log('  all fetched homework is past-dated — nothing current to sync');
+    return;
+  }
 
   const previousMap = store.readMap(child.slug);
   const { operations, unchangedKeys, brake } = reconcile({
