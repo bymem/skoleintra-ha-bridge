@@ -107,6 +107,18 @@ export async function verifyEntity({ api, token, entityId, log = console.log }) 
     );
   }
 
+  // Snapshot uids before the add. ha.js identifies a created item by diffing
+  // uids, so verify has to do the same. An earlier version matched on summary
+  // here while ha.js matched on summary + due_date — so this step passed while
+  // the real client failed on every single item.
+  const listBefore = await call('/services/todo/get_items?return_response', {
+    method: 'POST',
+    body: JSON.stringify({ entity_id: entityId }),
+  });
+  const uidsBefore = new Set(
+    ((listBefore.body?.service_response ?? listBefore.body)?.[entityId]?.items ?? []).map((i) => i.uid),
+  );
+
   // 6. add_item with `item` as the title field, plus due_date.
   const added = await call('/services/todo/add_item', {
     method: 'POST',
@@ -144,18 +156,28 @@ export async function verifyEntity({ api, token, entityId, log = console.log }) 
   });
   if (after.ok) {
     const payload = after.body?.service_response ?? after.body;
-    const match = (payload?.[entityId]?.items ?? []).filter((i) => i.summary === testSummary).at(-1);
+    const created = (payload?.[entityId]?.items ?? []).filter((i) => !uidsBefore.has(i.uid));
+    const match = created.length === 1 ? created[0] : created.filter((i) => i.summary === testSummary).at(-1);
     createdUid = match?.uid ?? null;
     record(
-      'Created item is findable and exposes a uid',
+      'New item identifiable by uid diff (how ha.js finds it)',
       !!createdUid,
-      createdUid ? `uid=${createdUid}` : 'No uid — ha.js would have to track summaries instead.',
+      createdUid ? `uid=${createdUid}` : `${created.length} new items appeared; could not tell which was ours.`,
     );
+
+    // Print the item verbatim. get_items was observed not to echo due_date at
+    // all, so the only way to learn what it *does* return is to look.
     if (match) {
+      log(`  INFO  item as returned by get_items:\n        ${JSON.stringify(match)}`);
+      // HA has used `due`, `due_date` and `due_datetime` across versions.
+      const dueValue = match.due_date ?? match.due ?? match.due_datetime;
       record(
-        'due_date round-trips unchanged',
-        match.due_date === TEST_DUE,
-        `sent ${TEST_DUE}, got ${JSON.stringify(match.due_date)}`,
+        'Due date is readable back from get_items',
+        dueValue === TEST_DUE || String(dueValue ?? '').startsWith(TEST_DUE),
+        dueValue === undefined
+          ? `sent due_date=${TEST_DUE}; get_items returns no due field at all. ` +
+            'Check the item in the HA UI: if the date shows there, only the read-back is missing.'
+          : `sent ${TEST_DUE}, got ${JSON.stringify(dueValue)}`,
       );
     }
   }

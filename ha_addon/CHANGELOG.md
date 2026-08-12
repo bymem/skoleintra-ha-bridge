@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.2
+
+Fixes every item failing with "could not find it again to read its uid".
+
+`todo.add_item` returns no uid, so the bridge has to find the item afterwards.
+It matched on summary + due date — but `todo.get_items` does not echo any due
+field back, so nothing ever matched and no item was recorded. Matching on
+summary alone would also have been wrong: the same subject legitimately appears
+on several dates, so it can return another item's uid.
+
+The uid is now found by diffing the list before and after the add, which
+depends on neither. `verify` uses the same logic; previously it matched on
+summary only, so it passed while the real client failed on every item.
+
+Also adds a startup check that each configured to-do entity exists. Calling
+`todo.get_items` on a missing entity answers HTTP 500, which repeated once per
+homework item and buried the real cause.
+
+Confirmed working: `homeassistant_api: true` alone is sufficient for `todo.*`
+through the Supervisor proxy.
+
+Known issue: `add_item` accepts `due_date` and returns 200, but `get_items`
+does not return any due field, so the bridge cannot confirm the date was
+stored. `verify` now prints the item verbatim to show what is actually
+returned.
+
 ## 0.1.1
 
 Fixes the build failing on install with `npm: not found`.

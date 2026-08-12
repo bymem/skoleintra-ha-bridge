@@ -124,7 +124,25 @@ async function pollCycle(config, store) {
       await ha.ping();
     }
 
+    // Check every configured list exists up front. Calling todo.get_items on a
+    // missing entity answers HTTP 500, which otherwise repeats once per
+    // homework item and buries the actual cause ("the list doesn't exist").
+    const children = [];
     for (const child of config.children) {
+      if (await ha.entityExists(child.ha_todo_entity)) {
+        children.push(child);
+      } else {
+        const line = `${child.slug}  ENTITY_MISSING  ${child.ha_todo_entity} does not exist — create the ` +
+          'Local To-do list, or correct ha_todo_entity in the App configuration.';
+        console.log(`  !! ${line}`);
+        store.append(line);
+      }
+    }
+    if (children.length === 0) {
+      throw new Error('None of the configured to-do entities exist — nothing to sync.');
+    }
+
+    for (const child of children) {
       await pollChild({ child, skoleintra, ha, store });
     }
 

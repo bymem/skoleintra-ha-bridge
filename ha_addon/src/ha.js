@@ -102,6 +102,15 @@ export class HomeAssistantClient {
   // uid, but the todo-map needs a uid to remove the item later. So after adding
   // we read the list back and match on summary + due date. That costs one extra
   // call per add, which only happens for genuinely new homework.
+  // todo.add_item returns nothing, so the uid has to be discovered afterwards.
+  //
+  // We do that by diffing uids before and after the add, rather than searching
+  // by summary and due date. Two reasons, both found against a real instance:
+  //   - get_items does NOT echo back due_date, so matching on it never matched.
+  //   - summaries are not unique. The same subject legitimately appears on
+  //     several dates ("MATEMATIK" on the 12th and the 14th), so a summary
+  //     match can return the wrong item's uid.
+  // A uid diff depends on neither and is exact.
   async addItem(entityId, { summary, description, dueDate }) {
     const data = { entity_id: entityId, item: summary };
     if (description) {
@@ -110,28 +119,42 @@ export class HomeAssistantClient {
     if (dueDate) {
       data.due_date = dueDate;
     }
-    await this.callService('todo', 'add_item', data);
 
     if (this.dryRun) {
+      await this.callService('todo', 'add_item', data);
       return `dry-run-uid-${summary}`;
     }
-    return this.resolveUid(entityId, { summary, dueDate });
+
+    const before = new Set((await this.getItems(entityId)).map((item) => item.uid));
+    await this.callService('todo', 'add_item', data);
+    const after = await this.getItems(entityId);
+
+    const created = after.filter((item) => !before.has(item.uid));
+    if (created.length === 1) {
+      return created[0].uid;
+    }
+    if (created.length === 0) {
+      throw new Error(`Added "${summary}" to ${entityId} but no new item appeared in the list.`);
+    }
+    // More than one appeared — something else wrote to the list at the same
+    // moment. Fall back to the newest matching summary rather than guessing.
+    const match = created.filter((item) => item.summary === summary).at(-1);
+    if (!match) {
+      throw new Error(`Added "${summary}" to ${entityId} but could not identify which new item it was.`);
+    }
+    return match.uid;
   }
 
-  // Find the uid of an item we just created.
-  async resolveUid(entityId, { summary, dueDate }) {
-    const items = await this.getItems(entityId);
-    // Match on summary and, when present, due date. If a teacher sets the same
-    // subject on two dates, the due date is what tells them apart.
-    const candidates = items.filter(
-      (candidate) => candidate.summary === summary && (!dueDate || candidate.due_date === dueDate),
-    );
-    if (candidates.length === 0) {
-      throw new Error(`Added "${summary}" to ${entityId} but could not find it again to read its uid.`);
+  // Cheap existence check so a mistyped or not-yet-created entity fails with a
+  // clear message instead of a burst of opaque HTTP 500s from get_items.
+  async entityExists(entityId) {
+    if (this.dryRun) {
+      return true;
     }
-    // Newest last is the usual ordering; if ambiguous, the last match is the
-    // one we just added.
-    return candidates[candidates.length - 1].uid;
+    const response = await fetch(`${this.baseUrl}/states/${entityId}`, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    return response.ok;
   }
 
   // ASSUMPTION: remove_item accepts a uid in `item`. Some HA versions expect the
