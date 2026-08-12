@@ -1,0 +1,57 @@
+name: "SkoleIntra Homework Bridge"
+version: "0.1.0"
+slug: "skoleintra_ha_bridge"
+description: "Syncs SkoleIntra Lektiebog homework into per-child to-do lists"
+url: "https://github.com/bymem/skoleintra-ha-bridge"
+
+arch:
+  - aarch64
+  - amd64
+  - armv7
+
+# The Node base image handles its own signals; no Supervisor init wrapper needed.
+init: false
+startup: application
+boot: auto
+
+# Grants Core API access through the Supervisor proxy and injects SUPERVISOR_TOKEN.
+# Nothing broader — no Supervisor control, no host access.
+homeassistant_api: true
+
+# No ports, ingress or map: the App only talks out to SkoleIntra and in to the
+# Core API, and its state lives in the /data every App is given automatically.
+
+options:
+  # Defaults to "verify" deliberately. The HA to-do calls have never run against
+  # a real instance, so a first install checks them and exits rather than
+  # writing anything. Switch to "poll" once the log shows all checks passing.
+  run_mode: "verify"
+  poll_cron: "0 6,13,17 * * 1-5"
+  base_url: "https://SCHOOL.m.skoleintra.dk"
+  username: ""
+  password: ""
+  sanity_brake:
+    enabled: true
+    min_changes: 3
+    max_change_ratio: 0.5
+  children:
+    - slug: "child-one"
+      name: "Child A"
+      child_path_segment: "parent/0000/NameA"
+      ha_todo_entity: "todo.homework_child_one"
+
+schema:
+  run_mode: "list(poll|verify)"
+  poll_cron: "str"
+  base_url: "url"
+  username: "str"
+  password: "password"
+  sanity_brake:
+    enabled: "bool"
+    min_changes: "int(1,)"
+    max_change_ratio: "float(0.0,1.0)"
+  children:
+    - slug: "str"
+      name: "str"
+      child_path_segment: "str"
+      ha_todo_entity: "str"

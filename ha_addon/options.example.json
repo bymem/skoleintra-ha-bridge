@@ -1,0 +1,22 @@
+{
+  "poll_cron": "0 6,13,17 * * 1-5",
+  "base_url": "https://SCHOOL.m.skoleintra.dk",
+  "username": "",
+  "password": "",
+  "data_dir": "./data",
+
+  "sanity_brake": {
+    "enabled": true,
+    "min_changes": 3,
+    "max_change_ratio": 0.5
+  },
+
+  "children": [
+    {
+      "slug": "child-one",
+      "name": "Child One",
+      "child_path_segment": "parent/0000/NameOne",
+      "ha_todo_entity": "todo.homework_child_one"
+    }
+  ]
+}

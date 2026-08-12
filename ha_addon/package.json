@@ -1,0 +1,23 @@
+{
+  "name": "skoleintra-ha-bridge",
+  "version": "0.1.0",
+  "description": "Syncs SkoleIntra Lektiebog homework into per-child Home Assistant to-do lists",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "poll": "node src/index.js --once",
+    "dry-run": "node src/index.js --once --dry-run",
+    "test": "node --test test/*.test.js",
+    "verify-ha": "node src/verify-ha.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "node-cron": "^3.0.3",
+    "node-html-parser": "^6.1.13",
+    "skoleintra": "^1.2.2"
+  }
+}

@@ -1,0 +1,6 @@
+# Never bake local state or credentials into the image.
+options.json
+data/
+node_modules/
+test/
+*.md
