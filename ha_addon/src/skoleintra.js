@@ -57,6 +57,75 @@ function clean(node) {
   return decodeEntities(node.innerText).replace(/\s+/g, ' ').trim();
 }
 
+// Home Assistant renders a to-do item's description as Markdown, and the
+// teachers' notes are real HTML — <strong>, <br>, <div> paragraphs and genuine
+// <a href> links to course material. Flattening that to plain text threw the
+// structure away and left bare URLs, so convert rather than strip.
+//
+// Only the handful of tags that actually appear are handled; anything else
+// falls through to its text, which is the safe outcome for a format we haven't
+// seen before.
+function renderMarkdown(node) {
+  // Text node: collapse internal whitespace, keep the words.
+  if (node.nodeType === 3) {
+    return decodeEntities(node.rawText).replace(/\s+/g, ' ');
+  }
+  if (node.nodeType !== 1) {
+    return '';
+  }
+
+  const tag = (node.rawTagName ?? '').toUpperCase();
+  const inner = node.childNodes.map(renderMarkdown).join('');
+  const trimmed = inner.trim();
+
+  switch (tag) {
+    case 'BR':
+      // Two trailing spaces is a Markdown hard break, and harmless as plain text.
+      return '  \n';
+    case 'P':
+    case 'DIV':
+    case 'TR':
+      return trimmed ? `\n\n${trimmed}\n\n` : '';
+    case 'STRONG':
+    case 'B':
+      return trimmed ? `**${trimmed}**` : '';
+    case 'EM':
+    case 'I':
+      return trimmed ? `*${trimmed}*` : '';
+    case 'A': {
+      const href = node.getAttribute('href');
+      if (!href) {
+        return trimmed;
+      }
+      if (!trimmed || trimmed === href) {
+        return href;
+      }
+      return `[${trimmed}](${href})`;
+    }
+    case 'LI':
+      return trimmed ? `\n- ${trimmed}` : '';
+    case 'UL':
+    case 'OL':
+      return trimmed ? `\n${inner}\n` : '';
+    case 'SCRIPT':
+    case 'STYLE':
+      return '';
+    default:
+      return inner;
+  }
+}
+
+export function htmlToMarkdown(node) {
+  return renderMarkdown(node)
+    // Drop indentation a line inherited from the source HTML's formatting.
+    // Only leading whitespace — the two trailing spaces before a newline are a
+    // deliberate Markdown hard break.
+    .replace(/\n[ \t]+/g, '\n')
+    // Collapse runs of blank lines to a single paragraph break.
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 // "Mandag, 17. aug. 2026:" -> "2026-08-17"
 export function parseDanishDate(heading) {
   const match = /(\d{1,2})\.\s*([a-zæøå]+)\.?\s*(\d{4})/i.exec(decodeEntities(heading));
@@ -87,7 +156,9 @@ export function itemsFromNote(noteEl, date) {
         continue;
       }
       const subject = clean(cells[0]);
-      const homework = clean(cells[1]);
+      // Subject stays plain text (it becomes the to-do title); the homework
+      // becomes the description, which HA renders as Markdown.
+      const homework = htmlToMarkdown(cells[1]);
       // Drop the header row and subjects with nothing assigned.
       if (!subject || !homework || /^FAG$/i.test(subject) || /^LEKTIER$/i.test(homework)) {
         continue;
@@ -103,7 +174,7 @@ export function itemsFromNote(noteEl, date) {
     table.remove();
   }
 
-  const remaining = clean(noteEl);
+  const remaining = htmlToMarkdown(noteEl);
   return remaining ? [{ date, subject: 'Lektier', homework: remaining }] : [];
 }
 
@@ -229,3 +300,8 @@ export class SkoleIntraClient {
     return { items, datesSeen };
   }
 }
+
+// Identifies how homework text is rendered into a to-do description. Bump this
+// whenever that rendering changes: every content hash shifts, and the poll that
+// follows must be recognised as a migration rather than a parser regression.
+export const CONTENT_FORMAT = 'markdown-v1';

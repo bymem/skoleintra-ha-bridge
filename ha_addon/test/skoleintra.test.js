@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parse } from 'node-html-parser';
-import { itemsFromNote, parseDanishDate, decodeEntities, dropPastItems, localIsoDate } from '../src/skoleintra.js';
+import { itemsFromNote, parseDanishDate, decodeEntities, dropPastItems, localIsoDate, htmlToMarkdown } from '../src/skoleintra.js';
 
 // Shaped like the real thing: a teacher-authored CKEditor table, complete with
 // the `widht` typo that is actually in the live markup.
@@ -156,4 +156,62 @@ test('localIsoDate uses local time, not UTC', () => {
 
 test('localIsoDate zero-pads single-digit months and days', () => {
   assert.equal(localIsoDate(new Date(2026, 0, 5)), '2026-01-05');
+});
+
+// --- HTML to Markdown ----------------------------------------------------
+// HA renders a to-do description as Markdown, and teacher notes are real HTML.
+
+function cell(html) {
+  return parse(`<td>${html}</td>`).querySelector('td');
+}
+
+test('bold survives as Markdown emphasis', () => {
+  assert.equal(htmlToMarkdown(cell('<strong>Lektie:</strong> s. 5-7')), '**Lektie:** s. 5-7');
+});
+
+test('links become Markdown links, not bare URLs', () => {
+  const md = htmlToMarkdown(cell('<a href="https://example.dk/side">Ferie i flammehavet</a>'));
+  assert.equal(md, '[Ferie i flammehavet](https://example.dk/side)');
+});
+
+test('a link whose text is its own URL is not doubled up', () => {
+  const md = htmlToMarkdown(cell('<a href="https://example.dk/x">https://example.dk/x</a>'));
+  assert.equal(md, 'https://example.dk/x');
+});
+
+test('br becomes a Markdown hard break', () => {
+  const md = htmlToMarkdown(cell('Lektie:<br> Læs side 12'));
+  assert.equal(md, 'Lektie:  \nLæs side 12');
+});
+
+test('divs become paragraphs, and empty ones do not leave gaps', () => {
+  const md = htmlToMarkdown(cell('<div>Første</div><div>&nbsp;</div><div>Anden</div>'));
+  assert.equal(md, 'Første\n\nAnden');
+});
+
+test('lists become Markdown bullets', () => {
+  const md = htmlToMarkdown(cell('<ul><li>Et</li><li>To</li></ul>'));
+  assert.equal(md, '- Et\n- To');
+});
+
+test('unknown tags fall through to their text rather than vanishing', () => {
+  assert.equal(htmlToMarkdown(cell('<span class="x">Husk <u>bogen</u></span>')), 'Husk bogen');
+});
+
+test('entities are decoded inside converted markup', () => {
+  assert.equal(htmlToMarkdown(cell('<div>&quot;overset nyhed&quot; p&aring; Alinea</div>')), '"overset nyhed" på Alinea');
+});
+
+test('homework cells are converted to Markdown, subjects stay plain', () => {
+  const note = parse(`
+    <div class="sk-user-input"><table><tbody>
+      <tr><td>FAG</td><td>LEKTIER</td></tr>
+      <tr><td><strong>DANSK</strong></td><td><strong>Lektie:</strong> se <a href="https://example.dk">her</a></td></tr>
+    </tbody></table></div>
+  `).querySelector('.sk-user-input');
+
+  const [item] = itemsFromNote(note, '2026-08-12');
+
+  assert.equal(item.subject, 'DANSK', 'subject is the to-do title, so it stays plain text');
+  assert.equal(item.homework, '**Lektie:** se [her](https://example.dk)');
 });

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.0
+
+Homework descriptions are now Markdown instead of flattened plain text.
+
+Home Assistant renders a to-do description as Markdown, and the teachers' notes
+are real HTML — bold, paragraphs, line breaks and genuine links to course
+material. That was previously stripped to a single run-on line with bare URLs.
+Links now render as links, **Lektie:** stays bold, and paragraphs survive.
+
+Because this changes every description, it also changes every content hash,
+which is indistinguishable from a parser regression. The first poll after
+upgrading is therefore recognised as a format migration: the sanity brake is
+suspended for that one poll, every item is rewritten once, and the new format
+is recorded in `content-format.txt`. The marker is only written if every item
+actually succeeded — otherwise a failed migration would leave the old hashes
+with the brake re-armed and no way out.
+
+Also fixes an item getting permanently stuck when its stored uid was stale
+(someone deleted it in the HA UI). The removal was retried and failed on every
+poll, so the teacher's edit never landed. The bridge now checks whether the
+item is actually present before removing it, and recreates it either way.
+
+Past-dated homework stays out of the lists, and items already added are still
+never removed when their date passes — an unchecked overdue item remains.
+
 ## 0.1.3
 
 No longer creates to-do items for homework whose date has already passed.

@@ -8,7 +8,7 @@
 import cron from 'node-cron';
 import { loadConfig } from './config.js';
 import { Store } from './store.js';
-import { SkoleIntraClient, dropPastItems } from './skoleintra.js';
+import { SkoleIntraClient, dropPastItems, CONTENT_FORMAT } from './skoleintra.js';
 import { HomeAssistantClient } from './ha.js';
 import { reconcile, nextMap } from './reconcile.js';
 import { verifyAll } from './verify-ha.js';
@@ -18,7 +18,7 @@ const runOnce = args.includes('--once');
 const dryRun = args.includes('--dry-run');
 const verifyFlag = args.includes('--verify');
 
-async function pollChild({ child, skoleintra, ha, store }) {
+async function pollChild({ child, skoleintra, ha, store, formatMigration = false }) {
   const now = new Date().toISOString();
   console.log(`\n--- ${child.name} (${child.slug}) ---`);
 
@@ -42,7 +42,7 @@ async function pollChild({ child, skoleintra, ha, store }) {
   // the reconciler would trip the EMPTY_FETCH brake every poll over a holiday.
   if (items.length === 0 && fetched.length > 0) {
     console.log('  all fetched homework is past-dated — nothing current to sync');
-    return;
+    return true;
   }
 
   const previousMap = store.readMap(child.slug);
@@ -50,7 +50,11 @@ async function pollChild({ child, skoleintra, ha, store }) {
     items,
     previousMap,
     brakeOptions: {
-      enabled: store.brakeOptions.enabled,
+      // A deliberate change to how homework text is rendered shifts every
+      // content hash at once, which is indistinguishable from a parser
+      // regression. Suspend the brake for that one migrating poll rather than
+      // making the user disable a safety setting by hand.
+      enabled: store.brakeOptions.enabled && !formatMigration,
       minChanges: store.brakeOptions.min_changes,
       maxChangeRatio: store.brakeOptions.max_change_ratio,
     },
@@ -60,25 +64,27 @@ async function pollChild({ child, skoleintra, ha, store }) {
     const line = `${child.slug}  SANITY_BRAKE  ${brake.reason}  ${brake.detail}`;
     console.log(`  !! ${line}`);
     store.append(line);
-    return;
+    return false;
   }
 
   if (operations.length === 0) {
     console.log(`  nothing to do (${unchangedKeys.length} unchanged)`);
     store.writeMap(child.slug, nextMap({ previousMap, operations, unchangedKeys, results: {}, now }));
-    return;
+    return true;
   }
 
   // For the audit trail we want each replaced item's completion status as it was
   // immediately before we touched it — the one thing the HA Logbook won't hand
   // you without cross-referencing two separate entries.
-  let statusByUid = {};
+  // null means "we could not read the list", which is different from "the list
+  // is empty" — the difference decides whether a missing uid is trustworthy.
+  let statusByUid = null;
   if (operations.some((op) => op.type === 'replace')) {
     try {
       const existing = await ha.getItems(child.ha_todo_entity);
       statusByUid = Object.fromEntries(existing.map((entry) => [entry.uid, entry.status]));
     } catch (error) {
-      console.log(`  (could not read current items for audit detail: ${error.message})`);
+      console.log(`  (could not read current items: ${error.message})`);
     }
   }
 
@@ -86,8 +92,15 @@ async function pollChild({ child, skoleintra, ha, store }) {
   for (const op of operations) {
     try {
       if (op.type === 'replace') {
-        const previousStatus = statusByUid[op.oldUid] ?? 'unknown';
-        await ha.removeItem(child.ha_todo_entity, op.oldUid);
+        const previousStatus = statusByUid?.[op.oldUid] ?? 'unknown';
+        // Skip the removal only when we positively know the item is gone. If
+        // the list could not be read, still attempt it — wrongly assuming it
+        // vanished would leave the old item behind as a duplicate.
+        const knownGone = statusByUid !== null && !(op.oldUid in statusByUid);
+        const removed = knownGone ? false : await ha.removeItem(child.ha_todo_entity, op.oldUid);
+        if (!removed) {
+          store.append(`${child.slug}  STALE_UID  ${op.key}  previous item was already gone; recreating it`);
+        }
         const uid = await ha.addItem(child.ha_todo_entity, {
           summary: op.item.subject,
           description: op.item.homework,
@@ -118,7 +131,9 @@ async function pollChild({ child, skoleintra, ha, store }) {
   }
 
   store.writeMap(child.slug, nextMap({ previousMap, operations, unchangedKeys, results, now }));
-  console.log(`  ${Object.keys(results).length}/${operations.length} operation(s) applied`);
+  const applied = Object.keys(results).length;
+  console.log(`  ${applied}/${operations.length} operation(s) applied`);
+  return applied === operations.length;
 }
 
 async function pollCycle(config, store) {
@@ -157,10 +172,33 @@ async function pollCycle(config, store) {
       throw new Error('None of the configured to-do entities exist — nothing to sync.');
     }
 
-    for (const child of children) {
-      await pollChild({ child, skoleintra, ha, store });
+    // Was the stored state written by an older rendering of homework text?
+    // A first-ever run has nothing to migrate; a run with existing maps but no
+    // recorded format predates the marker, so it used the old plain-text form.
+    const storedFormat = store.readContentFormat();
+    const formatMigration = storedFormat !== CONTENT_FORMAT && store.hasTrackedState();
+    if (formatMigration) {
+      const line = `FORMAT_MIGRATION  homework text rendering changed ` +
+        `(${storedFormat ?? 'plain-text'} -> ${CONTENT_FORMAT}); ` +
+        'every item will be rewritten once and the sanity brake is suspended for this poll.';
+      console.log(`  ${line}`);
+      store.append(line);
     }
 
+    let allApplied = true;
+    for (const child of children) {
+      const ok = await pollChild({ child, skoleintra, ha, store, formatMigration });
+      allApplied = allApplied && ok;
+    }
+
+    // Only record the new format once every item actually made it. Marking a
+    // failed migration as done would leave the old hashes in place with the
+    // brake re-armed, tripping MASS_CHANGE on every future poll with no way out.
+    if (allApplied) {
+      store.writeContentFormat(CONTENT_FORMAT);
+    } else if (formatMigration) {
+      console.log('  format migration incomplete — will retry on the next poll');
+    }
     await skoleintra.persistSession();
   } catch (error) {
     // On failure no HA calls have to be undone — each item is applied

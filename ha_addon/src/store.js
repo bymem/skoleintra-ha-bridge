@@ -4,7 +4,7 @@
 // If it's lost, the next poll treats everything as new and duplicates it — see
 // the Known limitation in the spec. /data is covered by HA's own backups.
 
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 export class Store {
@@ -41,6 +41,30 @@ export class Store {
       return;
     }
     writeFileSync(this.mapPath(slug), JSON.stringify(map, null, 2));
+  }
+
+  // How homework text was rendered when the maps were last written. Changing
+  // the rendering changes every content hash, which would otherwise look
+  // exactly like a parser regression and trip the sanity brake.
+  formatPath() {
+    return join(this.dataDir, 'content-format.txt');
+  }
+
+  readContentFormat() {
+    const path = this.formatPath();
+    return existsSync(path) ? readFileSync(path, 'utf8').trim() : null;
+  }
+
+  writeContentFormat(version) {
+    if (this.readOnly) {
+      return;
+    }
+    writeFileSync(this.formatPath(), version);
+  }
+
+  // Is there existing state at all? A first-ever run has nothing to migrate.
+  hasTrackedState() {
+    return readdirSync(this.dataDir).some((name) => name.startsWith('todo-map-'));
   }
 
   cookiePath() {

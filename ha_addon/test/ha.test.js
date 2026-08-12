@@ -39,7 +39,7 @@ function fakeHa({ entityId = 'todo.test', existingEntities = [entityId] } = {}) 
     if (target.pathname === '/api/services/todo/remove_item') {
       const index = items.findIndex((i) => i.uid === body.item);
       if (index === -1) {
-        return new Response('not found', { status: 400 });
+        return Response.json({ message: `Unable to find to-do item \"${body.item}\"` }, { status: 400 });
       }
       items.splice(index, 1);
       return new Response('', { status: 200 });
@@ -150,4 +150,31 @@ test('dry run never calls add_item for real', async () => {
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test('removeItem treats an already-deleted item as done, not as an error', async () => {
+  // Someone deleted the item in the HA UI, so our stored uid is stale. Throwing
+  // here left the item permanently stuck, retrying the same doomed removal on
+  // every poll and never picking up the teacher's edit.
+  const { fetchStub } = fakeHa();
+  await withStub(fetchStub, async () => {
+    const removed = await client().removeItem('todo.test', 'uid-that-never-existed');
+    assert.equal(removed, false);
+  });
+});
+
+test('removeItem reports true when it really did remove something', async () => {
+  const { fetchStub } = fakeHa();
+  await withStub(fetchStub, async () => {
+    const ha = client();
+    const uid = await ha.addItem('todo.test', { summary: 'DANSK' });
+    assert.equal(await ha.removeItem('todo.test', uid), true);
+  });
+});
+
+test('removeItem still throws on a genuine failure', async () => {
+  const failing = async () => new Response('boom', { status: 503 });
+  await withStub(failing, async () => {
+    await assert.rejects(() => client().removeItem('todo.test', 'uid-1'), /503/);
+  });
 });

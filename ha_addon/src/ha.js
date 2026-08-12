@@ -1,9 +1,15 @@
 // Home Assistant to-do client.
 //
-// ⚠ EVERYTHING IN THIS FILE IS UNVERIFIED against a real HA instance — the dev
-// machine can't reach one. Each assumption is marked ASSUMPTION and is checked
-// by `npm run verify-ha` (src/verify-ha.js) once HA is reachable. Run that
-// before trusting any of this.
+// Confirmed against a real instance: homeassistant_api: true alone is enough
+// for todo.* through the Supervisor proxy; add_item takes the title as `item`
+// and accepts due_date; remove_item takes a uid; get_items needs
+// ?return_response and answers with service_response alongside changed_states.
+//
+// Confirmed quirk: get_items does NOT echo any due field back, so the bridge
+// can never read a due date it has written.
+//
+// Anything still marked ASSUMPTION below is unverified. `npm run verify-ha`
+// (src/verify-ha.js) re-checks the lot against a live instance.
 //
 // Auth has two modes:
 //   - Inside an HA App: SUPERVISOR_TOKEN is injected, base URL is
@@ -94,17 +100,10 @@ export class HomeAssistantClient {
     return payload?.[entityId]?.items ?? [];
   }
 
-  // ASSUMPTION: the title field is `item`, and `due_date` (yyyy-mm-dd) is
-  // accepted — the latter needs TodoListEntityFeature.SET_DUE_DATE_ON_ITEM,
-  // which Local To-do is believed to support but has not been confirmed here.
+  // todo.add_item returns no body, so the created item's uid has to be
+  // discovered afterwards — and the to-do map needs it to remove the item later.
   //
-  // PROBLEM the spec missed: todo.add_item does NOT return the created item's
-  // uid, but the todo-map needs a uid to remove the item later. So after adding
-  // we read the list back and match on summary + due date. That costs one extra
-  // call per add, which only happens for genuinely new homework.
-  // todo.add_item returns nothing, so the uid has to be discovered afterwards.
-  //
-  // We do that by diffing uids before and after the add, rather than searching
+  // We find it by diffing uids before and after the add, rather than searching
   // by summary and due date. Two reasons, both found against a real instance:
   //   - get_items does NOT echo back due_date, so matching on it never matched.
   //   - summaries are not unique. The same subject legitimately appears on
@@ -157,9 +156,26 @@ export class HomeAssistantClient {
     return response.ok;
   }
 
-  // ASSUMPTION: remove_item accepts a uid in `item`. Some HA versions expect the
-  // summary here instead — verify before relying on it.
+  // Removes an item, tolerating one that has already gone.
+  //
+  // Returns true if it was removed, false if HA reports there was no such item.
+  // A stale uid is normal: someone deleted the item in the HA UI, or an earlier
+  // cycle removed it and failed before recording the result. Treating that as a
+  // hard error left the item permanently stuck, retrying the same doomed
+  // removal every poll and never applying the teacher's edit.
+  //
+  // NOTE: this message match is a fallback only — HA's exact wording here has
+  // not been confirmed. The caller's primary defence is checking the item is
+  // actually present before asking for its removal.
   async removeItem(entityId, uid) {
-    await this.callService('todo', 'remove_item', { entity_id: entityId, item: uid });
+    try {
+      await this.callService('todo', 'remove_item', { entity_id: entityId, item: uid });
+      return true;
+    } catch (error) {
+      if (/unable to find|not found|no such/i.test(error.message)) {
+        return false;
+      }
+      throw error;
+    }
   }
 }

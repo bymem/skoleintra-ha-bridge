@@ -76,6 +76,11 @@ Two quirks worth knowing before editing `ha_addon/src/skoleintra.js`:
   current classes use a two-column subject/homework table, but that is a
   convention, not a schema. The parser keeps the note whole when there is no
   usable table.
+- That HTML is converted to **Markdown**, which is how HA renders a to-do
+  description — links stay links, bold stays bold, paragraphs survive.
+  Changing that rendering changes every content hash, so `CONTENT_FORMAT` in
+  `src/skoleintra.js` must be bumped alongside it; the next poll is then treated
+  as a migration and the sanity brake is suspended for it.
 
 ## Safety
 
@@ -98,7 +103,7 @@ an uncompleted item stays on the list until it is checked off or deleted.
 ```bash
 cd ha_addon
 npm install
-npm test        # 37 tests: reconciler, Lektiebog parser, and the HA client
+npm test        # 49 tests: reconciler, Lektiebog parser, and the HA client
 npm run dry-run # fetches real homework, writes nothing anywhere
 ```
 
@@ -122,5 +127,5 @@ what proves agreement with a real instance.
 ## Not done yet
 
 - Multi-arch GHCR image + GitHub Actions (the Supervisor builds locally for now)
-- Whether `due_date` is actually stored, given `get_items` never returns it
-- Removing items once their date has passed, or once they vanish from SkoleIntra
+- Removing items once their date has passed, or once they vanish from
+  SkoleIntra — deliberately not done; an unchecked overdue item stays put
